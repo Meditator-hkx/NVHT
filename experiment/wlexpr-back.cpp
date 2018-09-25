@@ -22,7 +22,7 @@ struct pool_t {
 };
 
 static void *heap_base_addr = 0;
-static int *wear_leveling_mac = 0; // wear-leveling maximum access counter
+static int *wear_leveling_mgr = 0; // wear-leveling
 
 #define HEAP_SIZE_MIN 131072 // 128kB
 #define HEAP_CHUNK_SIZE 128 // 128B per chunk
@@ -89,15 +89,14 @@ static void wear_leveling_init(int heap_size) {
 	int realsize = (heap_size - 3 * sizeof(int)) / (HEAP_CHUNK_SIZE + 2 * sizeof(int)); /* no need to fix */
 	int arrlen = 2 * realsize - 1;
 	/* init wear-leveling : init to 0 on each startup */
-	wear_leveling_mac = (int *)malloc(arrlen * sizeof(int));
-	memset(wear_leveling_mac, 0, arrlen * sizeof(int));
+	wear_leveling_mgr = (int *)malloc(arrlen * sizeof(int));
+	memset(wear_leveling_mgr, 0, arrlen * sizeof(int));
 }
 
 void print_wear_leveling_stat() {
 	// Maximum block erase count. 
 	struct pool_t *p = get_pool_addr();
-	// cout << p->do_wear_leveling << " " << wear_leveling_mac[0] << endl;
-	cout << wear_leveling_mac[0] << endl;
+	cout << p->do_wear_leveling << " " << wear_leveling_mgr[0] << endl;
 }
 
 void nvalloc_init(int h_nvid, int heap_size, bool do_wl) {
@@ -126,7 +125,7 @@ void nvalloc_init(int h_nvid, int heap_size, bool do_wl) {
 
 void nvalloc_delete() {
 	free(heap_base_addr);
-	free(wear_leveling_mac);
+	free(wear_leveling_mgr);
 }
 
 int nvalloc_malloc(int size) {
@@ -159,7 +158,7 @@ int nvalloc_malloc(int size) {
 		int li = LEFT_LEAF(index), ri = RIGHT_LEAF(index);
 		if (p->longest[li] >= chunk_num && p->longest[ri] >= chunk_num) {
 			if (p->do_wear_leveling)
-				index = wear_leveling_mac[li] <= wear_leveling_mac[ri]? li: ri;
+				index = wear_leveling_mgr[li] <= wear_leveling_mgr[ri]? li: ri;
 			else
 				index = li;
 		} else if (p->longest[li] >= chunk_num) {
@@ -170,7 +169,7 @@ int nvalloc_malloc(int size) {
 	}
 	/* mark use */
 	p->longest[index] = 0;
-	wear_leveling_mac[index]++;
+	wear_leveling_mgr[index]++;
 	int offset = (index + 1) * nodesize - p->size;
 	/* record use to parents
 	 * update wear-leveling info
@@ -186,11 +185,11 @@ int nvalloc_malloc(int size) {
 	}
 	
 	for (i=PARENT(index); i>=0; i=PARENT(i)) {
-		int tmp = MAX(wear_leveling_mac[LEFT_LEAF(i)], wear_leveling_mac[RIGHT_LEAF(i)]);
-		if (wear_leveling_mac[i] >= tmp) {
+		int tmp = MAX(wear_leveling_mgr[LEFT_LEAF(i)], wear_leveling_mgr[RIGHT_LEAF(i)]);
+		if (wear_leveling_mgr[i] >= tmp) {
 			break;
 		}
-		wear_leveling_mac[i] = tmp;
+		wear_leveling_mgr[i] = tmp;
 		if (i==0)
 			break;
 	}
@@ -265,7 +264,6 @@ int main(int argc, char *argv[]) {
 			freev.pop_back();
 		}
 	}
-    cout << "No wear leveling: maximum access count = ";
 	print_wear_leveling_stat();
 	nvalloc_delete();
 	nvalloc_init(1, 10*1024*1024, true);
@@ -278,7 +276,6 @@ int main(int argc, char *argv[]) {
 			freev.pop_back();
 		}
 	}
-    cout << "With wear leveling: maximum access count = ";
 	print_wear_leveling_stat();
 	nvalloc_delete();
 	return 0;
